@@ -240,6 +240,8 @@ if __name__ == "__main__":
     logger.info("🚀 Launching Research Assistant Bot...")
 
     try:
+        import gc
+        gc.collect()
         asyncio.run(run_all())
     except KeyboardInterrupt:
         logger.info("Shutting down...")

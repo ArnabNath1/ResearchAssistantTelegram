@@ -20,7 +20,7 @@ class VectorStore:
     """
 
     def __init__(self):
-        self.embedding_model = SentenceTransformer(settings.embedding_model)
+        self._model = None
         self.dimension = 384  # all-MiniLM-L6-v2 output dim
         self.collection = None
         self._init_db()
@@ -49,9 +49,24 @@ class VectorStore:
             logger.error(f"Astra DB init failed: {e}")
             self.collection = None
 
+    def _get_model(self):
+        """Lazy load the embedding model to save memory on start."""
+        if self._model is None:
+            logger.info(f"Loading embedding model: {settings.embedding_model}")
+            # Optimization: Disable gradients for torch to save RAM
+            try:
+                import torch
+                torch.set_grad_enabled(False)
+            except ImportError:
+                pass
+            
+            self._model = SentenceTransformer(settings.embedding_model)
+        return self._model
+
     def _embed(self, text: str) -> list[float]:
         """Generate normalized embedding for text."""
-        embedding = self.embedding_model.encode(text, normalize_embeddings=True)
+        model = self._get_model()
+        embedding = model.encode(text, normalize_embeddings=True)
         return embedding.tolist()
 
     def _doc_id(self, text: str) -> str:
