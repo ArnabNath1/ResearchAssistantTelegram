@@ -4,6 +4,12 @@ for RAG-based grounded scientific reasoning.
 """
 
 import httpx
+import hashlib
+import requests
+from typing import Optional
+from loguru import logger
+from astrapy import DataAPIClient
+from config import settings
 
 class VectorStore:
     """
