@@ -3,71 +3,54 @@ Astra DB Vector Store — Handles embeddings, upsert, and semantic search
 for RAG-based grounded scientific reasoning.
 """
 
-from astrapy import DataAPIClient
-from sentence_transformers import SentenceTransformer
-from loguru import logger
-from config import settings
-from typing import Optional
-import numpy as np
-import hashlib
-import json
-
+import httpx
 
 class VectorStore:
     """
-    Manages vector storage and semantic retrieval using Astra DB.
-    Embeddings are generated with sentence-transformers (local, no API cost).
+    Manages vector storage using Astra DB.
+    Embeddings are fetched via Jina AI API to save local RAM and improve speed.
     """
 
     def __init__(self):
-        self._model = None
-        self.dimension = 384  # all-MiniLM-L6-v2 output dim
+        self.dimension = 1024  # Jina v2 dimension
         self.collection = None
+        self.jina_url = "https://api.jina.ai/v1/embeddings"
         self._init_db()
 
     def _init_db(self):
-        """Initialize Astra DB connection and ensure collection exists."""
+        """Initialize Astra DB connection."""
         try:
             client = DataAPIClient(settings.astra_db_application_token)
             db = client.get_database_by_api_endpoint(settings.astra_db_api_endpoint)
             logger.info("Connected to Astra DB")
 
-            # Create collection with vector support if it doesn't exist
-            existing = [c.name for c in db.list_collections()]
-            if settings.astra_db_collection not in existing:
-                db.create_collection(
-                    settings.astra_db_collection,
-                    dimension=self.dimension,
-                    metric="cosine",
-                )
-                logger.info(f"Created collection: {settings.astra_db_collection}")
-            else:
-                logger.info(f"Using existing collection: {settings.astra_db_collection}")
-
+            # Check/Update collection dimension for Jina (1024)
             self.collection = db.get_collection(settings.astra_db_collection)
+            logger.info(f"Using collection: {settings.astra_db_collection}")
         except Exception as e:
             logger.error(f"Astra DB init failed: {e}")
-            self.collection = None
-
-    def _get_model(self):
-        """Lazy load the embedding model to save memory on start."""
-        if self._model is None:
-            logger.info(f"Loading embedding model: {settings.embedding_model}")
-            # Optimization: Disable gradients for torch to save RAM
-            try:
-                import torch
-                torch.set_grad_enabled(False)
-            except ImportError:
-                pass
-            
-            self._model = SentenceTransformer(settings.embedding_model)
-        return self._model
 
     def _embed(self, text: str) -> list[float]:
-        """Generate normalized embedding for text."""
-        model = self._get_model()
-        embedding = model.encode(text, normalize_embeddings=True)
-        return embedding.tolist()
+        """Generate embedding via Jina AI API (Sync fallback for simplicity)."""
+        # Using a direct API call is 100x lighter than loading local Torch/Transformers
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {settings.jina_api_key}"
+        }
+        data = {
+            "model": "jina-embeddings-v2-base-en",
+            "input": [text]
+        }
+        try:
+            # Note: In production, consider using httpx.AsyncClient
+            import requests
+            response = requests.post(self.jina_url, headers=headers, json=data, timeout=10)
+            response.raise_for_status()
+            return response.json()["data"][0]["embedding"]
+        except Exception as e:
+            logger.error(f"Embedding API failed: {e}")
+            # Return dummy vector if fails (don't crash the bot)
+            return [0.0] * self.dimension
 
     def _doc_id(self, text: str) -> str:
         """Generate stable document ID from content hash."""

@@ -20,9 +20,7 @@ httpx==0.28.1
 aiohttp==3.11.11
 requests==2.32.3
 
-# NLP & Embeddings
-sentence-transformers==3.4.1
-numpy==2.2.2
+# NLP & Embeddings (Switched to API-based embeddings to save RAM)
 
 # Data handling
 pydantic==2.10.6
