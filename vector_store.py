@@ -5,7 +5,6 @@ for RAG-based grounded scientific reasoning.
 
 import httpx
 import hashlib
-import requests
 from typing import Optional
 from loguru import logger
 from astrapy import DataAPIClient
@@ -37,8 +36,7 @@ class VectorStore:
             logger.error(f"Astra DB init failed: {e}")
 
     def _embed(self, text: str) -> list[float]:
-        """Generate embedding via Jina AI API (Sync fallback for simplicity)."""
-        # Using a direct API call is 100x lighter than loading local Torch/Transformers
+        """Generate embedding via Jina AI API."""
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {settings.jina_api_key}"
@@ -48,14 +46,13 @@ class VectorStore:
             "input": [text]
         }
         try:
-            # Note: In production, consider using httpx.AsyncClient
-            import requests
-            response = requests.post(self.jina_url, headers=headers, json=data, timeout=10)
-            response.raise_for_status()
-            return response.json()["data"][0]["embedding"]
+            # Use synchronous httpx for safety in this context
+            with httpx.Client() as client:
+                response = client.post(self.jina_url, headers=headers, json=data, timeout=10.0)
+                response.raise_for_status()
+                return response.json()["data"][0]["embedding"]
         except Exception as e:
             logger.error(f"Embedding API failed: {e}")
-            # Return dummy vector if fails (don't crash the bot)
             return [0.0] * self.dimension
 
     def _doc_id(self, text: str) -> str:
