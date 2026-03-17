@@ -35,25 +35,33 @@ class VectorStore:
         except Exception as e:
             logger.error(f"Astra DB init failed: {e}")
 
-    def _embed(self, text: str) -> list[float]:
-        """Generate embedding via Jina AI API."""
+    def _embed_batch(self, texts: list[str]) -> list[list[float]]:
+        """Generate embeddings for a batch of texts via Jina AI API."""
+        if not texts:
+            return []
+            
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {settings.jina_api_key}"
         }
         data = {
             "model": "jina-embeddings-v2-base-en",
-            "input": [text]
+            "input": texts
         }
         try:
-            # Use synchronous httpx for safety in this context
             with httpx.Client() as client:
-                response = client.post(self.jina_url, headers=headers, json=data, timeout=10.0)
+                # Increased timeout to 30.0s for larger batches
+                response = client.post(self.jina_url, headers=headers, json=data, timeout=30.0)
                 response.raise_for_status()
-                return response.json()["data"][0]["embedding"]
+                return [item["embedding"] for item in response.json()["data"]]
         except Exception as e:
-            logger.error(f"Embedding API failed: {e}")
-            return [0.0] * self.dimension
+            logger.error(f"Batch embedding API failed: {e}")
+            # Fallback: return zero vectors
+            return [[0.0] * self.dimension for _ in texts]
+
+    def _embed(self, text: str) -> list[float]:
+        """Generate a single embedding."""
+        return self._embed_batch([text])[0]
 
     def _doc_id(self, text: str) -> str:
         """Generate stable document ID from content hash."""
@@ -71,37 +79,40 @@ class VectorStore:
         chunks = self._chunk_text(full_text, chunk_size=800, overlap=100)
         docs = []
 
-        # Store abstract as a special high-priority chunk
-        abstract_doc = {
-            "_id": f"{paper_id}_abstract",
-            "paper_id": paper_id,
-            "title": title,
-            "chunk_type": "abstract",
-            "text": abstract,
-            "$vector": self._embed(abstract),
-            "metadata": metadata or {},
-        }
-        docs.append(abstract_doc)
+        # Prepare all documents (without vectors first)
+        all_docs_metadata = []
+        all_texts = [abstract] + chunks
+        
+        # Determine chunk indices/types for metadata
+        doc_metadata = []
+        doc_metadata.append({"id": f"{paper_id}_abstract", "type": "abstract", "idx": 0})
+        for i in range(len(chunks)):
+            doc_metadata.append({"id": f"{paper_id}_chunk_{i}", "type": "body", "idx": i})
 
-        # Store body chunks
-        for i, chunk in enumerate(chunks):
-            doc = {
-                "_id": f"{paper_id}_chunk_{i}",
-                "paper_id": paper_id,
-                "title": title,
-                "chunk_type": "body",
-                "chunk_index": i,
-                "text": chunk,
-                "$vector": self._embed(chunk),
-                "metadata": metadata or {},
-            }
-            docs.append(doc)
-
-        # Upsert in batches
+        # Process embeddings in batches of 20 to avoid API limits
         batch_size = 20
-        for i in range(0, len(docs), batch_size):
-            batch = docs[i : i + batch_size]
-            self.collection.insert_many(batch, ordered=False)
+        for i in range(0, len(all_texts), batch_size):
+            text_batch = all_texts[i : i + batch_size]
+            meta_batch = doc_metadata[i : i + batch_size]
+            
+            logger.info(f"Embedding batch {i//batch_size + 1} for '{title}'...")
+            vectors = self._embed_batch(text_batch)
+            
+            docs_to_insert = []
+            for j, vector in enumerate(vectors):
+                docs_to_insert.append({
+                    "_id": meta_batch[j]["id"],
+                    "paper_id": paper_id,
+                    "title": title,
+                    "chunk_type": meta_batch[j]["type"],
+                    "chunk_index": meta_batch[j]["idx"] if meta_batch[j]["type"] == "body" else None,
+                    "text": text_batch[j],
+                    "$vector": vector,
+                    "metadata": metadata or {},
+                })
+            
+            if docs_to_insert:
+                self.collection.insert_many(docs_to_insert, ordered=False)
 
         logger.info(f"Upserted paper '{title}' with {len(docs)} chunks")
 
