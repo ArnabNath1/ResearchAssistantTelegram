@@ -19,11 +19,11 @@ class Settings(BaseSettings):
     # Astra DB
     astra_db_application_token: str = Field(..., env="ASTRA_DB_APPLICATION_TOKEN")
     astra_db_api_endpoint: str = Field(..., env="ASTRA_DB_API_ENDPOINT")
-    astra_db_collection: str = Field("research_knowledge", env="ASTRA_DB_COLLECTION")
+    astra_db_collection: str = Field("research_knowledge_jina", env="ASTRA_DB_COLLECTION")
 
     # Embedding
     embedding_model: str = Field("all-MiniLM-L6-v2", env="EMBEDDING_MODEL")
-    jina_api_key: str = Field("jina_79ca9069d7fc447d95393f9c62923508WpA_r8vIunAs_jKjI8-G9D62Tz6b", env="JINA_API_KEY")
+    jina_api_key: str = Field(..., env="JINA_API_KEY")
 
     # API
     api_host: str = Field("0.0.0.0", env="API_HOST")

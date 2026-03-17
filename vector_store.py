@@ -17,7 +17,7 @@ class VectorStore:
     """
 
     def __init__(self):
-        self.dimension = 1024  # Jina v2 dimension
+        self.dimension = 768  # Jina v2 base dimension
         self.collection = None
         self.jina_url = "https://api.jina.ai/v1/embeddings"
         self._init_db()
